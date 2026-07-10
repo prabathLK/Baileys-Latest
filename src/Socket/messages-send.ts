@@ -1057,6 +1057,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			// WA Web never attaches tctoken to peer (AppStateSync) messages — server rejects with 479
 			const isPeerMessage = additionalAttributes?.['category'] === 'peer'
 			const is1on1Send = !isGroup && !isRetryResend && !isStatus && !isNewsletter && !isPeerMessage
+			const isProtocolMsg = !!normalizeMessageContent(message)?.protocolMessage
+			const isBotOrPSA = destinationJid === PSA_WID || isJidBot(destinationJid) || isJidMetaAI(destinationJid)
 
 			// Resolve destination to LID for tctoken storage — matches Signal session key pattern
 			const tcTokenJid = is1on1Send ? await resolveTcTokenJid(destinationJid, getLIDForPN) : destinationJid
@@ -1083,11 +1085,6 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			// ========================================================================
 			// 🚀 FIX FOR 463 ERROR: FETCH TCTOKEN SYNCHRONOUSLY BEFORE SENDING
 			// ========================================================================
-			const isProtocolMsg = !!normalizeMessageContent(message)?.protocolMessage
-			const isBotOrPSA = destinationJid === PSA_WID || isJidBot(destinationJid) || isJidMetaAI(destinationJid)
-			const isPeerMessage = additionalAttributes?.['category'] === 'peer'
-			const is1on1Send = !isGroup && !isRetryResend && !isStatus && !isNewsletter && !isPeerMessage
-
 			if (is1on1Send && !tcTokenBuffer?.length && !isProtocolMsg && !isBotOrPSA && sock.serverProps.privacyTokenOn1to1) {
 				logger.debug({ jid: destinationJid }, 'tctoken missing, fetching BEFORE sending message to prevent 463 error')
 				try {
@@ -1142,12 +1139,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 			await sendNode(stanza)
 
-
-
 			// Fire-and-forget: issue our token to the contact AFTER message send.
-			// WA Web skips protocol messages and PSA/bot contacts (TcTokenChatAction: isRegularUser)
-			const isProtocolMsg = !!normalizeMessageContent(message)?.protocolMessage
-			const isBotOrPSA = destinationJid === PSA_WID || isJidBot(destinationJid) || isJidMetaAI(destinationJid)
 			if (
 				is1on1Send &&
 				!isProtocolMsg &&
@@ -1189,6 +1181,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 						inFlightTcTokenIssuance.delete(tcTokenJid)
 					})
 			}
+
 
 			// Add message to retry cache if enabled
 			if (messageRetryManager && !participant) {
@@ -1464,4 +1457,4 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			}
 		}
 	}
-}
+		}
