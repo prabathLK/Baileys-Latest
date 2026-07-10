@@ -1900,6 +1900,16 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 								onNewJidStored: trackTcTokenJid
 							})
 							logger.debug({ from: ackFrom }, 'completed 463 token recovery issuance')
+							
+							// --- BUG FIX: Auto-Resend logic starts here ---
+							const msg = await getMessage(key)
+							if (msg) {
+								logger.info({ msgId: attrs.id }, 'Resending message after 463 token recovery')
+								await delay(1000)
+								await relayMessage(ackFrom, msg, { messageId: attrs.id, useUserDevicesCache: false })
+							}
+							// --- BUG FIX: Auto-Resend logic ends here ---
+							
 						} catch (err: any) {
 							logger.debug({ from: ackFrom, err: err?.message }, 'failed 463 token recovery issuance')
 						} finally {
@@ -2171,4 +2181,4 @@ export const makeMessagesRecvSocket = (config: SocketConfig) => {
 		requestPlaceholderResend,
 		messageRetryManager
 	}
-}
+						}
