@@ -1080,6 +1080,52 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 				}
 			}
 
+			// ========================================================================
+			// 🚀 FIX FOR 463 ERROR: FETCH TCTOKEN SYNCHRONOUSLY BEFORE SENDING
+			// ========================================================================
+			const isProtocolMsg = !!normalizeMessageContent(message)?.protocolMessage
+			const isBotOrPSA = destinationJid === PSA_WID || isJidBot(destinationJid) || isJidMetaAI(destinationJid)
+			const isPeerMessage = additionalAttributes?.['category'] === 'peer'
+			const is1on1Send = !isGroup && !isRetryResend && !isStatus && !isNewsletter && !isPeerMessage
+
+			if (is1on1Send && !tcTokenBuffer?.length && !isProtocolMsg && !isBotOrPSA && sock.serverProps.privacyTokenOn1to1) {
+				logger.debug({ jid: destinationJid }, 'tctoken missing, fetching BEFORE sending message to prevent 463 error')
+				try {
+					const issueTimestamp = unixTimestampSeconds()
+					const getPNForLID = signalRepository.lidMapping.getPNForLID.bind(signalRepository.lidMapping)
+					const issueJid = await resolveIssuanceJid(destinationJid, sock.serverProps.lidTrustedTokenIssueToLid, getLIDForPN, getPNForLID)
+
+					// Await the token issuance BEFORE dispatching the message
+					const result = await issuePrivacyTokens([issueJid], issueTimestamp)
+					await storeTcTokensFromIqResult({
+						result,
+						fallbackJid: tcTokenJid,
+						keys: authState.keys,
+						getLIDForPN
+					})
+
+					// Fetch the newly stored token to attach it to the stanza
+					const currentData = await authState.keys.get('tctoken', [tcTokenJid])
+					tcTokenBuffer = currentData[tcTokenJid]?.token
+
+					// Update senderTimestamp and index to prevent duplicate issuance
+					const currentEntry = currentData[tcTokenJid]
+					const indexWrite = await buildMergedTcTokenIndexWrite(authState.keys, [tcTokenJid])
+					await authState.keys.set({
+						tctoken: {
+							[tcTokenJid]: {
+								...currentEntry,
+								senderTimestamp: issueTimestamp
+							},
+							...indexWrite
+						}
+					})
+				} catch (err: any) {
+					logger.warn({ jid: destinationJid, err: err?.message }, 'failed to fetch tctoken before send')
+				}
+			}
+			// ========================================================================
+
 			if (tcTokenBuffer?.length && sock.serverProps.privacyTokenOn1to1) {
 				;(stanza.content as BinaryNode[]).push({
 					tag: 'tctoken',
@@ -1095,6 +1141,8 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 			logger.debug({ msgId }, `sending message to ${participants.length} devices`)
 
 			await sendNode(stanza)
+
+
 
 			// Fire-and-forget: issue our token to the contact AFTER message send.
 			// WA Web skips protocol messages and PSA/bot contacts (TcTokenChatAction: isRegularUser)
